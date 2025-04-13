@@ -1,0 +1,14 @@
+﻿using BLL.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace BLL.Configuration
+{
+    public static class ApplicationConfiguration
+    {
+        public static void ConfigureBll(this WebApplicationBuilder builder)
+        {
+            builder.Services.AddScoped<IUserService, UserService>();
+        }
+    }
+}

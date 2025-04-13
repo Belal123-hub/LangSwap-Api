@@ -22,3 +22,4 @@ C:\Users\Belal\Desktop\LangSwap-Api\DTO\obj\Debug\net8.0\DTO.dll
 C:\Users\Belal\Desktop\LangSwap-Api\DTO\obj\Debug\net8.0\refint\DTO.dll
 C:\Users\Belal\Desktop\LangSwap-Api\DTO\obj\Debug\net8.0\DTO.pdb
 C:\Users\Belal\Desktop\LangSwap-Api\DTO\obj\Debug\net8.0\ref\DTO.dll
+C:\Users\Belal\Desktop\LangSwap-Api\DTO\obj\Debug\net8.0\DTO.sourcelink.json

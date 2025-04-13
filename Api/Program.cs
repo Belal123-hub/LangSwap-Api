@@ -1,8 +1,17 @@
+using BLL.Configuration;
 using DAL.configuration;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+// Add Controllers with JSON enum string conversion
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Convert enums to strings in JSON responses
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 builder.ConfigureDal();
+builder.ConfigureBll();
 
 
 // Add services to the container.

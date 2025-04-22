@@ -1,12 +1,14 @@
-﻿using DAL.Data;
+﻿using BLL.Configuration;
+using DAL.Configuration;
+using DAL.Data;
 using DTO;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace BLL.Services
 {
@@ -14,16 +16,21 @@ namespace BLL.Services
     public interface IUserService
     {
         Task Register(UserRegisterDto model);
+        Task<LoginResponseDto> Login(LoginCredentialsDto model);
+        Task<LoginResponseDto> Refresh(string refreshToken);
+
     }
     public class UserService: IUserService
     {
         private readonly UserManager<User> _userManager;
+        private readonly JwtBearerTokenSettings _jwtTokenSettings;
         private readonly ApplicationDbContext _context;
 
-        public UserService(UserManager<User> userManager, ApplicationDbContext context)
+        public UserService(UserManager<User> userManager, IOptions<JwtBearerTokenSettings> options, ApplicationDbContext context)
         {
             _userManager = userManager;
-            _context = context;        
+            _context = context;
+            _jwtTokenSettings = options.Value;
         }
 
         public async Task Register(UserRegisterDto model)
@@ -51,5 +58,98 @@ namespace BLL.Services
                 throw new Exception($"Some errors during creating user! Data: {result.Errors}");
             }
         }
+
+        public async Task<LoginResponseDto> Login(LoginCredentialsDto model)
+        {
+            var user = await ValidateUser(model);
+            var result = new LoginResponseDto
+            {
+                AccessToken = await GenerateAccessToken(user),
+                RefreshToken = await GenerateRefreshToken(user)
+            };
+            return result;
+        }
+        private async Task<User> ValidateUser(LoginCredentialsDto credentials)
+        {
+            var identityUser = await _userManager.FindByEmailAsync(credentials.Email);
+            if (identityUser != null)
+            {
+                var result = _userManager.PasswordHasher.VerifyHashedPassword(identityUser, identityUser.PasswordHash,
+                    credentials.Password);
+                if (result == PasswordVerificationResult.Success)
+                {
+                    return identityUser;
+                }
+            }
+
+            throw new ArgumentException("Login data was incorrect");
+        }
+        private async Task<string> GenerateAccessToken(User user)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.ASCII.GetBytes(_jwtTokenSettings.secretKey);
+
+            var isAdmin = await _userManager.IsInRoleAsync(user, ApplicationRoleNames.Administrator);
+
+            var descriptior = new SecurityTokenDescriptor
+            {
+                Audience = _jwtTokenSettings.Audience,
+                Issuer = _jwtTokenSettings.Issuer,
+                Expires = DateTime.UtcNow.AddSeconds(_jwtTokenSettings.AccessTokenExpiryTimeInSeconds),
+                Subject = new ClaimsIdentity(new List<Claim>
+                {
+                    new Claim(ClaimTypes.Email, user.Email),
+                    new Claim(ClaimTypes.Name, user.FullName),
+                    new Claim("Id", user.Id.ToString()),
+                    new Claim(ClaimTypes.Role, isAdmin ? ApplicationRoleNames.Administrator : ApplicationRoleNames.User),
+                }),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(descriptior);
+            var userToken = tokenHandler.WriteToken(token);
+            return userToken;
+        }
+
+        public async Task<LoginResponseDto> Refresh(string refreshToken)
+        {
+            var storedToken = await _context.UserRefreshTokens
+                .FirstOrDefaultAsync(x => x.Token == refreshToken && x.ExpiryDateTime > DateTime.UtcNow);
+
+            if (storedToken == null)
+                throw new SecurityTokenException("Invalid or expired refresh token");
+
+            var user = await _userManager.FindByIdAsync(storedToken.UserId.ToString());
+            if (user == null)
+                throw new KeyNotFoundException($"User with id = {storedToken.UserId} does not found!");
+
+            storedToken.ExpiryDateTime = DateTime.UtcNow.AddMinutes(-5);
+            await _context.SaveChangesAsync();
+
+            return new LoginResponseDto()
+            {
+                AccessToken = await GenerateAccessToken(user),
+                RefreshToken = await GenerateRefreshToken(user)
+            };
+        }
+
+        private async Task<string> GenerateRefreshToken(User user)
+        {
+            var refreshToken = Guid.NewGuid();
+            var refreshTokenString = Convert.ToBase64String(refreshToken.ToByteArray());
+
+            var userRefreshToken = new UserRefreshToken
+            {
+                UserId = user.Id,
+                Token = refreshTokenString,
+                ExpiryDateTime = DateTime.UtcNow.AddDays(_jwtTokenSettings.RefreshTokenExpiryTimeInDays)
+            };
+
+            _context.UserRefreshTokens.Add(userRefreshToken);
+            await _context.SaveChangesAsync();
+            return refreshTokenString;
+        }
+
+
     }
 }
